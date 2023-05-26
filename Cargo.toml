@@ -1,0 +1,9 @@
+[package]
+name = "sampletree"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+rodio = "0.12"
+jwalk = "0.8"
+termion = "1"
