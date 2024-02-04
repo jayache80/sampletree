@@ -1,5 +1,5 @@
 use jwalk::WalkDir;
-use rodio::{OutputStreamHandle, Source};
+use rodio::Sink;
 use std::env;
 use std::fs::File;
 use std::io;
@@ -10,6 +10,8 @@ use termion;
 use termion::input::TermRead;
 use termion::raw::{IntoRawMode, RawTerminal};
 
+const NUM_SINKS: usize = 16;
+
 struct ProgrammedKey<'a> {
     key: String,
     idx: String,
@@ -18,7 +20,7 @@ struct ProgrammedKey<'a> {
 
 fn handle_key_press(
     path: Option<&PathBuf>,
-    stream_handle: &OutputStreamHandle,
+    sink: &Sink,
     stdout: &mut RawTerminal<Stdout>,
     idx: &String,
     programmed_key: Option<&ProgrammedKey>,
@@ -95,9 +97,12 @@ fn handle_key_press(
         return;
     }
 
+    // Stop whatever may be already playing
+    sink.stop();
+
     if let Ok(sound_file) = File::open(path.unwrap().display().to_string()) {
         if let Ok(source) = rodio::Decoder::new(BufReader::new(sound_file)) {
-            stream_handle.play_raw(source.convert_samples()).ok();
+            sink.append(source);
         }
     }
 }
@@ -106,8 +111,25 @@ fn make_idx(i: usize, max: usize) -> String {
     format!("[{}/{}]", i + 1, max)
 }
 
+fn postincrement(x: &mut usize, max: usize) -> usize {
+    let ret = *x;
+    if *x < (max - 1) {
+        *x += 1;
+    } else {
+        *x = 0;
+    }
+    ret
+}
+
+fn stop_all(sinks: &Vec<Sink>) {
+    for sink in sinks {
+        sink.stop();
+    }
+}
+
 fn walk_and_play(path: &String) {
-    let mut i = 0;
+    let mut i: usize = 0;
+    let mut sink_idx: usize = 0;
     let mut paths = Vec::new();
     let mut z: ProgrammedKey = ProgrammedKey {
         key: "z?".to_string(),
@@ -144,6 +166,13 @@ fn walk_and_play(path: &String) {
     // Audio backend
     let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
 
+    // Create a list of Sinks to be used in a round-robin fashion
+    let mut sinks: Vec<Sink> = vec![];
+    for _ in 0..NUM_SINKS {
+        let sink = Sink::try_new(&stream_handle).unwrap();
+        sinks.push(sink);
+    }
+
     // Set terminal to raw mode to allow reading stdin one key at a time
     let mut stdout = io::stdout().into_raw_mode().unwrap();
 
@@ -152,7 +181,7 @@ fn walk_and_play(path: &String) {
 
     handle_key_press(
         Some(&paths[i]),
-        &stream_handle,
+        &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
         &mut stdout,
         &make_idx(i, paths.len()),
         None,
@@ -170,7 +199,7 @@ fn walk_and_play(path: &String) {
                     }
                     handle_key_press(
                         Some(&paths[i]),
-                        &stream_handle,
+                        &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                         &mut stdout,
                         &make_idx(i, paths.len()),
                         None,
@@ -184,7 +213,7 @@ fn walk_and_play(path: &String) {
                     }
                     handle_key_press(
                         Some(&paths[i]),
-                        &stream_handle,
+                        &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                         &mut stdout,
                         &make_idx(i, paths.len()),
                         None,
@@ -194,7 +223,7 @@ fn walk_and_play(path: &String) {
                     z if !z.path.is_none() => {
                         handle_key_press(
                             z.path,
-                            &stream_handle,
+                            &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                             &mut stdout,
                             &"".to_string(),
                             Some(&z),
@@ -203,7 +232,7 @@ fn walk_and_play(path: &String) {
                     _ => {
                         handle_key_press(
                             Some(&paths[i]),
-                            &stream_handle,
+                            &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                             &mut stdout,
                             &make_idx(i, paths.len()),
                             Some(&z),
@@ -216,7 +245,7 @@ fn walk_and_play(path: &String) {
                     z.path = Some(&paths[i]);
                     handle_key_press(
                         z.path,
-                        &stream_handle,
+                        &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                         &mut stdout,
                         &"".to_string(),
                         Some(&z),
@@ -226,7 +255,7 @@ fn walk_and_play(path: &String) {
                     x if !x.path.is_none() => {
                         handle_key_press(
                             x.path,
-                            &stream_handle,
+                            &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                             &mut stdout,
                             &"".to_string(),
                             Some(&x),
@@ -235,7 +264,7 @@ fn walk_and_play(path: &String) {
                     _ => {
                         handle_key_press(
                             Some(&paths[i]),
-                            &stream_handle,
+                            &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                             &mut stdout,
                             &make_idx(i, paths.len()),
                             Some(&x),
@@ -248,7 +277,7 @@ fn walk_and_play(path: &String) {
                     x.path = Some(&paths[i]);
                     handle_key_press(
                         x.path,
-                        &stream_handle,
+                        &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                         &mut stdout,
                         &"".to_string(),
                         Some(&x),
@@ -258,7 +287,7 @@ fn walk_and_play(path: &String) {
                     c if !c.path.is_none() => {
                         handle_key_press(
                             c.path,
-                            &stream_handle,
+                            &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                             &mut stdout,
                             &"".to_string(),
                             Some(&c),
@@ -267,7 +296,7 @@ fn walk_and_play(path: &String) {
                     _ => {
                         handle_key_press(
                             Some(&paths[i]),
-                            &stream_handle,
+                            &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                             &mut stdout,
                             &make_idx(i, paths.len()),
                             Some(&c),
@@ -280,7 +309,7 @@ fn walk_and_play(path: &String) {
                     c.path = Some(&paths[i]);
                     handle_key_press(
                         c.path,
-                        &stream_handle,
+                        &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                         &mut stdout,
                         &"".to_string(),
                         Some(&c),
@@ -290,7 +319,7 @@ fn walk_and_play(path: &String) {
                     v if !v.path.is_none() => {
                         handle_key_press(
                             v.path,
-                            &stream_handle,
+                            &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                             &mut stdout,
                             &"".to_string(),
                             Some(&v),
@@ -299,7 +328,7 @@ fn walk_and_play(path: &String) {
                     _ => {
                         handle_key_press(
                             Some(&paths[i]),
-                            &stream_handle,
+                            &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                             &mut stdout,
                             &make_idx(i, paths.len()),
                             Some(&v),
@@ -312,11 +341,14 @@ fn walk_and_play(path: &String) {
                     v.path = Some(&paths[i]);
                     handle_key_press(
                         v.path,
-                        &stream_handle,
+                        &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                         &mut stdout,
                         &"".to_string(),
                         Some(&v),
                     );
+                }
+                termion::event::Key::Char('s') => {
+                    stop_all(&sinks);
                 }
                 termion::event::Key::Char('q') => {
                     break 'outer;
@@ -327,7 +359,7 @@ fn walk_and_play(path: &String) {
                 _ => {
                     handle_key_press(
                         Some(&paths[i]),
-                        &stream_handle,
+                        &sinks[postincrement(&mut sink_idx, NUM_SINKS)],
                         &mut stdout,
                         &make_idx(i, paths.len()),
                         None,
