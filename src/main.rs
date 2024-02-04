@@ -1,38 +1,78 @@
+use jwalk::WalkDir;
+use rodio::{OutputStreamHandle, Source};
+use std::env;
 use std::fs::File;
 use std::io;
-use std::io::{Write, BufReader, Stdout};
+use std::io::{BufReader, Stdout, Write};
 use std::path::PathBuf;
 use std::{thread, time};
-use jwalk::WalkDir;
-use rodio::{Source, OutputStreamHandle};
-use std::env;
 use termion;
 use termion::input::TermRead;
 use termion::raw::{IntoRawMode, RawTerminal};
 
-fn play(path: &PathBuf, stream_handle: &OutputStreamHandle, stdout: &mut RawTerminal<Stdout>, idx: &String) {
+struct ProgrammedKey<'a> {
+    key: String,
+    idx: String,
+    path: Option<&'a PathBuf>,
+}
+
+fn handle_key_press(
+    path: Option<&PathBuf>,
+    stream_handle: &OutputStreamHandle,
+    stdout: &mut RawTerminal<Stdout>,
+    idx: &String,
+    programmed_key: Option<&ProgrammedKey>,
+) {
     let mut z = " ";
     let mut x = " ";
     let mut c = " ";
     let mut v = " ";
     let mut idx_ = String::from("");
+    let mut noplay = false;
 
-    match idx.as_str() {
-        "z" => {
-            z = "x";
-        },
-        "x" => {
-            x = "x";
-        },
-        "c" => {
-            c = "x";
-        },
-        "v" => {
-            v = "x";
+    match programmed_key {
+        Some(programmed_key) => match programmed_key.key.as_str() {
+            "z" => {
+                z = "x";
+                idx_ = format!("{} ", programmed_key.idx).to_string();
+            }
+            "z?" => {
+                z = "?";
+                noplay = true;
+                idx_ = format!("{} ", idx).to_string();
+            }
+            "x" => {
+                x = "x";
+                idx_ = format!("{} ", programmed_key.idx).to_string();
+            }
+            "x?" => {
+                x = "?";
+                noplay = true;
+                idx_ = format!("{} ", idx).to_string();
+            }
+            "c" => {
+                c = "x";
+                idx_ = format!("{} ", programmed_key.idx).to_string();
+            }
+            "c?" => {
+                c = "?";
+                noplay = true;
+                idx_ = format!("{} ", idx).to_string();
+            }
+            "v" => {
+                v = "x";
+                idx_ = format!("{} ", programmed_key.idx).to_string();
+            }
+            "v?" => {
+                v = "?";
+                noplay = true;
+                idx_ = format!("{} ", idx).to_string();
+            }
+            _ => (),
         },
         _ => {
             idx_ = format!("{} ", idx).to_string();
-        },
+        }
     }
 
     write!(
@@ -46,11 +86,16 @@ fn play(path: &PathBuf, stream_handle: &OutputStreamHandle, stdout: &mut RawTerm
         v,
         termion::clear::CurrentLine,
         idx_,
-        path.display().to_string(),
-        ).unwrap();
+        path.unwrap().display().to_string(),
+    )
+    .unwrap();
     stdout.lock().flush().unwrap();
 
-    if let Ok(sound_file) = File::open(path.display().to_string()) {
+    if noplay {
+        return;
+    }
+
+    if let Ok(sound_file) = File::open(path.unwrap().display().to_string()) {
         if let Ok(source) = rodio::Decoder::new(BufReader::new(sound_file)) {
             stream_handle.play_raw(source.convert_samples()).ok();
         }
@@ -58,16 +103,32 @@ fn play(path: &PathBuf, stream_handle: &OutputStreamHandle, stdout: &mut RawTerm
 }
 
 fn make_idx(i: usize, max: usize) -> String {
-    format!("[{}/{}]", i+1, max)
+    format!("[{}/{}]", i + 1, max)
 }
 
 fn walk_and_play(path: &String) {
     let mut i = 0;
     let mut paths = Vec::new();
-    let mut z: Option<&PathBuf> = None;
-    let mut x: Option<&PathBuf> = None;
-    let mut c: Option<&PathBuf> = None;
-    let mut v: Option<&PathBuf> = None;
+    let mut z: ProgrammedKey = ProgrammedKey {
+        key: "z?".to_string(),
+        idx: "".to_string(),
+        path: None,
+    };
+    let mut x: ProgrammedKey = ProgrammedKey {
+        key: "x?".to_string(),
+        idx: "".to_string(),
+        path: None,
+    };
+    let mut c: ProgrammedKey = ProgrammedKey {
+        key: "c?".to_string(),
+        idx: "".to_string(),
+        path: None,
+    };
+    let mut v: ProgrammedKey = ProgrammedKey {
+        key: "v?".to_string(),
+        idx: "".to_string(),
+        path: None,
+    };
 
     for file in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
         if file.metadata().unwrap().is_file() {
@@ -89,7 +150,13 @@ fn walk_and_play(path: &String) {
     // Use asynchronous stdin
     let mut stdin = termion::async_stdin().keys();
 
-    play(&paths[i], &stream_handle, &mut stdout, &make_idx(i, paths.len()));
+    handle_key_press(
+        Some(&paths[i]),
+        &stream_handle,
+        &mut stdout,
+        &make_idx(i, paths.len()),
+        None,
+    );
 
     'outer: loop {
         let input = stdin.next();
@@ -101,61 +168,170 @@ fn walk_and_play(path: &String) {
                     } else {
                         i += 1;
                     }
-                    play(&paths[i], &stream_handle, &mut stdout, &make_idx(i, paths.len()));
-                },
+                    handle_key_press(
+                        Some(&paths[i]),
+                        &stream_handle,
+                        &mut stdout,
+                        &make_idx(i, paths.len()),
+                        None,
+                    );
+                }
                 termion::event::Key::Char('k') | termion::event::Key::Char('o') => {
                     if i == 0 {
                         i = paths.len() - 1;
                     } else {
                         i -= 1;
                     }
-                    play(&paths[i], &stream_handle, &mut stdout, &make_idx(i, paths.len()));
-                },
-                termion::event::Key::Char('z') => {
-                    if z == None {
-                        z = Some(&paths[i]);
+                    handle_key_press(
+                        Some(&paths[i]),
+                        &stream_handle,
+                        &mut stdout,
+                        &make_idx(i, paths.len()),
+                        None,
+                    );
+                }
+                termion::event::Key::Char('z') => match &z {
+                    z if !z.path.is_none() => {
+                        handle_key_press(
+                            z.path,
+                            &stream_handle,
+                            &mut stdout,
+                            &"".to_string(),
+                            Some(&z),
+                        );
                     }
-                    play(z.unwrap(), &stream_handle, &mut stdout, &"z".to_string());
+                    _ => {
+                        handle_key_press(
+                            Some(&paths[i]),
+                            &stream_handle,
+                            &mut stdout,
+                            &make_idx(i, paths.len()),
+                            Some(&z),
+                        );
+                    }
                 },
                 termion::event::Key::Char('Z') => {
-                    z = Some(&paths[i]);
-                    play(z.unwrap(), &stream_handle, &mut stdout, &"z".to_string());
-                },
-                termion::event::Key::Char('x') => {
-                    if x == None {
-                        x = Some(&paths[i]);
+                    z.key = "z".to_string();
+                    z.idx = make_idx(i, paths.len());
+                    z.path = Some(&paths[i]);
+                    handle_key_press(
+                        z.path,
+                        &stream_handle,
+                        &mut stdout,
+                        &"".to_string(),
+                        Some(&z),
+                    );
+                }
+                termion::event::Key::Char('x') => match &x {
+                    x if !x.path.is_none() => {
+                        handle_key_press(
+                            x.path,
+                            &stream_handle,
+                            &mut stdout,
+                            &"".to_string(),
+                            Some(&x),
+                        );
                     }
-                    play(x.unwrap(), &stream_handle, &mut stdout, &"x".to_string());
+                    _ => {
+                        handle_key_press(
+                            Some(&paths[i]),
+                            &stream_handle,
+                            &mut stdout,
+                            &make_idx(i, paths.len()),
+                            Some(&x),
+                        );
+                    }
                 },
                 termion::event::Key::Char('X') => {
-                    x = Some(&paths[i]);
-                    play(x.unwrap(), &stream_handle, &mut stdout, &"x".to_string());
-                },
-                termion::event::Key::Char('c') => {
-                    if c == None {
-                        c = Some(&paths[i]);
+                    x.key = "x".to_string();
+                    x.idx = make_idx(i, paths.len());
+                    x.path = Some(&paths[i]);
+                    handle_key_press(
+                        x.path,
+                        &stream_handle,
+                        &mut stdout,
+                        &"".to_string(),
+                        Some(&x),
+                    );
+                }
+                termion::event::Key::Char('c') => match &c {
+                    c if !c.path.is_none() => {
+                        handle_key_press(
+                            c.path,
+                            &stream_handle,
+                            &mut stdout,
+                            &"".to_string(),
+                            Some(&c),
+                        );
                     }
-                    play(c.unwrap(), &stream_handle, &mut stdout, &"c".to_string());
+                    _ => {
+                        handle_key_press(
+                            Some(&paths[i]),
+                            &stream_handle,
+                            &mut stdout,
+                            &make_idx(i, paths.len()),
+                            Some(&c),
+                        );
+                    }
                 },
                 termion::event::Key::Char('C') => {
-                    c = Some(&paths[i]);
-                    play(c.unwrap(), &stream_handle, &mut stdout, &"c".to_string());
-                },
-                termion::event::Key::Char('v') => {
-                    if v == None {
-                        v = Some(&paths[i]);
+                    c.key = "c".to_string();
+                    c.idx = make_idx(i, paths.len());
+                    c.path = Some(&paths[i]);
+                    handle_key_press(
+                        c.path,
+                        &stream_handle,
+                        &mut stdout,
+                        &"".to_string(),
+                        Some(&c),
+                    );
+                }
+                termion::event::Key::Char('v') => match &v {
+                    v if !v.path.is_none() => {
+                        handle_key_press(
+                            v.path,
+                            &stream_handle,
+                            &mut stdout,
+                            &"".to_string(),
+                            Some(&v),
+                        );
                     }
-                    play(v.unwrap(), &stream_handle, &mut stdout, &"v".to_string());
+                    _ => {
+                        handle_key_press(
+                            Some(&paths[i]),
+                            &stream_handle,
+                            &mut stdout,
+                            &make_idx(i, paths.len()),
+                            Some(&v),
+                        );
+                    }
                 },
                 termion::event::Key::Char('V') => {
-                    v = Some(&paths[i]);
-                    play(v.unwrap(), &stream_handle, &mut stdout, &"v".to_string());
-                },
+                    v.key = "v".to_string();
+                    v.idx = make_idx(i, paths.len());
+                    v.path = Some(&paths[i]);
+                    handle_key_press(
+                        v.path,
+                        &stream_handle,
+                        &mut stdout,
+                        &"".to_string(),
+                        Some(&v),
+                    );
+                }
                 termion::event::Key::Char('q') => {
                     break 'outer;
-                },
+                }
+                termion::event::Key::Ctrl('c') => {
+                    break 'outer;
+                }
                 _ => {
-                    play(&paths[i], &stream_handle, &mut stdout, &make_idx(i, paths.len()));
+                    handle_key_press(
+                        Some(&paths[i]),
+                        &stream_handle,
+                        &mut stdout,
+                        &make_idx(i, paths.len()),
+                        None,
+                    );
                     stdout.lock().flush().unwrap();
                 }
             }
@@ -163,6 +339,31 @@ fn walk_and_play(path: &String) {
         thread::sleep(time::Duration::from_micros(1000));
     }
     write!(stdout, "\r\n").unwrap();
+
+    match &z {
+        z if !z.path.is_none() => {
+            write!(stdout, "z: {}\r\n", z.path.unwrap().display().to_string()).unwrap();
+        }
+        _ => (),
+    }
+    match &x {
+        x if !x.path.is_none() => {
+            write!(stdout, "x: {}\r\n", x.path.unwrap().display().to_string()).unwrap();
+        }
+        _ => (),
+    }
+    match &c {
+        c if !c.path.is_none() => {
+            write!(stdout, "c: {}\r\n", c.path.unwrap().display().to_string()).unwrap();
+        }
+        _ => (),
+    }
+    match &v {
+        v if !v.path.is_none() => {
+            write!(stdout, "v: {}\r\n", v.path.unwrap().display().to_string()).unwrap();
+        }
+        _ => (),
+    }
 }
 
 fn main() {
