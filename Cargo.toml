@@ -4,6 +4,6 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies]
-rodio = "0.12"
+rodio = "0.17"
 jwalk = "0.8"
 termion = "1"
