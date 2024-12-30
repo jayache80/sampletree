@@ -7,3 +7,4 @@ edition = "2021"
 rodio = "0.17"
 jwalk = "0.8"
 termion = "1"
+mio = { version = "1", features = ["os-poll", "os-ext"] }
