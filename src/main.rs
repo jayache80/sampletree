@@ -2,6 +2,7 @@ use jwalk::WalkDir;
 use rodio::Sink;
 use std::env;
 use std::fs::File;
+use std::process::ExitCode;
 use std::io;
 use std::io::{BufReader, Stdout, Write};
 use std::path::PathBuf;
@@ -398,14 +399,17 @@ fn walk_and_play(path: &String) {
     }
 }
 
-fn main() {
+fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
         println!("Provide path to directory to traverse as first argument\n");
-    } else {
-        let path = &args[1];
-        println!("Traversing {}\n", path);
-        walk_and_play(path);
+        return ExitCode::from(1);
     }
+
+    let path = &args[1];
+    println!("Traversing {}\n", path);
+    walk_and_play(path);
+
+    return ExitCode::from(0);
 }
